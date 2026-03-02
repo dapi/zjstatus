@@ -1,24 +1,26 @@
-.PHONY: build test test-integration
-
-WASM_TARGET = wasm32-wasip1
-WASM_ARTIFACT = target/$(WASM_TARGET)/release/zjstatus.wasm
-DOCKER_IMAGE = zjstatus-test
+.PHONY: build test clippy dev install-scripts install-layout install-plugin install
 
 build:
-	cargo build --target $(WASM_TARGET) --release
+	cargo build --target wasm32-wasip1 --release
 
 test:
 	cargo nextest run --lib
 
-test-integration: build
-	docker build -f Dockerfile.test -t $(DOCKER_IMAGE) .
-	docker run --rm \
-		-v "$$(pwd)/$(WASM_ARTIFACT):/test/plugin.wasm:ro" \
-		-v "$$(pwd)/tests/integration:/test/tests:ro" \
-		$(DOCKER_IMAGE) \
-		/test/tests/docker-test-runner.sh
-	docker run --rm \
-		-v "$$(pwd)/$(WASM_ARTIFACT):/test/plugin.wasm:ro" \
-		-v "$$(pwd)/tests/integration:/test/tests:ro" \
-		$(DOCKER_IMAGE) \
-		/test/tests/test-race-runner.sh
+clippy:
+	cargo clippy --all-features --lib
+
+dev:
+	zellij -l ai-default
+
+install-scripts:
+	install -m 755 scripts/zellij-tab-status ~/.local/bin/
+
+install-plugin: build
+	install -d ~/.config/zellij/plugins
+	install -m 644 target/wasm32-wasip1/release/zjstatus.wasm ~/.config/zellij/plugins/
+
+install-layout:
+	install -d ~/.config/zellij/layouts
+	install -m 644 layouts/ai-default.kdl ~/.config/zellij/layouts/
+
+install: install-plugin install-layout install-scripts
