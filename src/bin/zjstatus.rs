@@ -30,6 +30,7 @@ struct State {
     widget_map: BTreeMap<String, Arc<dyn Widget>>,
     err: Option<anyhow::Error>,
     plugin_url: Option<String>,
+    prev_tab_count: usize,
 }
 
 #[cfg(not(test))]
@@ -108,27 +109,12 @@ impl ZellijPlugin for State {
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
         let mut should_render = false;
 
-        match pipe_message.source {
-            PipeSource::Cli(_) => {
-                if let Some(input) = pipe_message.payload {
-                    let (render, _broadcast) =
-                        pipe::parse_protocol(&mut self.state, &input);
-                    should_render = render;
-                }
-            }
-            PipeSource::Plugin(_) => {
-                if let Some(input) = pipe_message.payload {
-                    let (render, _broadcast) =
-                        pipe::parse_protocol(&mut self.state, &input);
-                    should_render = render;
-                }
-            }
-            PipeSource::Keybind => {
-                if let Some(input) = pipe_message.payload {
-                    let (render, _broadcast) =
-                        pipe::parse_protocol(&mut self.state, &input);
-                    should_render = render;
-                }
+        if let Some(input) = pipe_message.payload {
+            let (render, broadcast) = pipe::parse_protocol(&mut self.state, &input);
+            should_render = render;
+
+            if broadcast {
+                self.broadcast_statuses();
             }
         }
 
@@ -183,6 +169,28 @@ impl ZellijPlugin for State {
 }
 
 impl State {
+    fn broadcast_statuses(&self) {
+        let Some(url) = &self.plugin_url else {
+            tracing::debug!("broadcast_statuses: plugin_url not yet discovered, skipping");
+            return;
+        };
+
+        if self.state.tab_statuses.is_empty() {
+            return;
+        }
+
+        let json = pipe::serialize_tab_statuses(&self.state.tab_statuses);
+        let payload = format!("zjstatus::status_sync::{}", json);
+
+        pipe_message_to_plugin(
+            MessageToPlugin::new("zjstatus")
+                .with_plugin_url(url)
+                .with_payload(&payload),
+        );
+
+        tracing::debug!(payload = %payload, "broadcast tab_statuses to siblings");
+    }
+
     fn handle_event(&mut self, event: Event) -> bool {
         let mut should_render = false;
         match event {
@@ -319,6 +327,14 @@ impl State {
                 self.state
                     .tab_statuses
                     .retain(|pos, _| valid_positions.contains(pos));
+
+                // Broadcast statuses to new instances when tab count grows
+                if self.state.tabs.len() > self.prev_tab_count
+                    && !self.state.tab_statuses.is_empty()
+                {
+                    self.broadcast_statuses();
+                }
+                self.prev_tab_count = self.state.tabs.len();
 
                 should_render = true;
             }
