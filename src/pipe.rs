@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ops::Sub;
 
 use chrono::{Duration, Local};
@@ -44,6 +45,41 @@ pub fn parse_protocol(state: &mut ZellijState, input: &str) -> (bool, bool) {
     }
 
     (should_render, should_broadcast)
+}
+
+pub fn serialize_tab_statuses(map: &BTreeMap<usize, String>) -> String {
+    let entries: Vec<String> = map
+        .iter()
+        .map(|(k, v)| {
+            let escaped = v.replace('\\', "\\\\").replace('"', "\\\"");
+            format!("\"{}\":\"{}\"", k, escaped)
+        })
+        .collect();
+    format!("{{{}}}", entries.join(","))
+}
+
+fn deserialize_tab_statuses(json: &str) -> Option<BTreeMap<usize, String>> {
+    let json = json.trim();
+    if !json.starts_with('{') || !json.ends_with('}') {
+        return None;
+    }
+    let inner = &json[1..json.len() - 1];
+    if inner.trim().is_empty() {
+        return Some(BTreeMap::new());
+    }
+    let mut map = BTreeMap::new();
+    for part in inner.split(',') {
+        let part = part.trim();
+        let kv: Vec<&str> = part.splitn(2, ':').collect();
+        if kv.len() != 2 {
+            return None;
+        }
+        let key = kv[0].trim().trim_matches('"');
+        let value = kv[1].trim().trim_matches('"');
+        let idx = key.parse::<usize>().ok()?;
+        map.insert(idx, value.to_string());
+    }
+    Some(map)
 }
 
 fn resolve_tab_index(panes: &PaneManifest, pane_id: u32) -> Option<usize> {
@@ -112,6 +148,18 @@ fn process_line(state: &mut ZellijState, line: &str) -> (bool, bool) {
                 }
                 should_render = true;
                 should_broadcast = true;
+            }
+        }
+        "status_sync" => {
+            if parts.len() < 3 {
+                return (false, false);
+            }
+            if let Some(new_statuses) = deserialize_tab_statuses(parts[2]) {
+                state.tab_statuses = new_statuses;
+                should_render = true;
+                // should_broadcast stays false — cycle prevention
+            } else {
+                tracing::warn!("status_sync: invalid JSON: {}", parts[2]);
             }
         }
         "clear_status" => {
@@ -183,7 +231,7 @@ mod test {
 
     use crate::config::ZellijState;
 
-    use super::{process_line, resolve_tab_index};
+    use super::{deserialize_tab_statuses, process_line, resolve_tab_index, serialize_tab_statuses};
 
     fn make_state_with_panes() -> ZellijState {
         let mut panes = HashMap::new();
@@ -308,6 +356,62 @@ mod test {
             process_line(&mut state, "zjstatus::clear_status::20");
         assert!(should_render);
         assert!(should_broadcast);
+    }
+
+    #[test]
+    fn test_status_sync_replaces_local_statuses() {
+        let mut state = make_state_with_panes();
+        state.tab_statuses.insert(0, "old".to_string());
+        let (should_render, should_broadcast) =
+            process_line(&mut state, "zjstatus::status_sync::{\"0\":\"🤖\",\"1\":\"✅\"}");
+        assert!(should_render);
+        assert!(!should_broadcast);
+        assert_eq!(state.tab_statuses.get(&0), Some(&"🤖".to_string()));
+        assert_eq!(state.tab_statuses.get(&1), Some(&"✅".to_string()));
+    }
+
+    #[test]
+    fn test_status_sync_clears_missing_keys() {
+        let mut state = make_state_with_panes();
+        state.tab_statuses.insert(0, "🤖".to_string());
+        state.tab_statuses.insert(1, "✅".to_string());
+        let (should_render, _) =
+            process_line(&mut state, "zjstatus::status_sync::{\"1\":\"✅\"}");
+        assert!(should_render);
+        assert!(state.tab_statuses.get(&0).is_none());
+        assert_eq!(state.tab_statuses.get(&1), Some(&"✅".to_string()));
+    }
+
+    #[test]
+    fn test_status_sync_empty_map() {
+        let mut state = make_state_with_panes();
+        state.tab_statuses.insert(0, "🤖".to_string());
+        let (should_render, _) = process_line(&mut state, "zjstatus::status_sync::{}");
+        assert!(should_render);
+        assert!(state.tab_statuses.is_empty());
+    }
+
+    #[test]
+    fn test_status_sync_invalid_json() {
+        let mut state = make_state_with_panes();
+        state.tab_statuses.insert(0, "🤖".to_string());
+        let (should_render, _) = process_line(&mut state, "zjstatus::status_sync::not_json");
+        assert!(!should_render);
+        assert_eq!(state.tab_statuses.get(&0), Some(&"🤖".to_string()));
+    }
+
+    #[test]
+    fn test_serialize_tab_statuses() {
+        let mut map = std::collections::BTreeMap::new();
+        map.insert(0, "🤖".to_string());
+        map.insert(1, "✅".to_string());
+        assert_eq!(serialize_tab_statuses(&map), "{\"0\":\"🤖\",\"1\":\"✅\"}");
+    }
+
+    #[test]
+    fn test_serialize_empty_map() {
+        let map = std::collections::BTreeMap::new();
+        assert_eq!(serialize_tab_statuses(&map), "{}");
     }
 
     /// Demonstrates the root cause of status desync between zjstatus instances.
