@@ -454,4 +454,32 @@ mod test {
             "instances have divergent tab_statuses — root cause of the visual glitch"
         );
     }
+
+    /// Verifies that status_sync resolves the desync between instances.
+    ///
+    /// When instance_0 updates tab_statuses, it broadcasts via status_sync.
+    /// A new instance_1 receives the sync and now agrees with instance_0.
+    #[test]
+    fn test_status_sync_resolves_instance_desync() {
+        // Instance 0 receives set_status
+        let mut instance_0 = make_state_with_panes();
+        let (_, should_broadcast) = process_line(&mut instance_0, "zjstatus::set_status::10::🤖");
+        assert!(should_broadcast);
+
+        // Simulate broadcast: serialize instance_0's statuses
+        let sync_payload = serialize_tab_statuses(&instance_0.tab_statuses);
+        let sync_line = format!("zjstatus::status_sync::{}", sync_payload);
+
+        // Instance 1 (new tab) receives the sync
+        let mut instance_1 = make_state_with_panes();
+        assert!(instance_1.tab_statuses.is_empty(), "starts empty");
+
+        let (should_render, should_broadcast) = process_line(&mut instance_1, &sync_line);
+        assert!(should_render);
+        assert!(!should_broadcast, "sync must not re-broadcast");
+
+        // Now both instances agree
+        assert_eq!(instance_0.tab_statuses, instance_1.tab_statuses);
+        assert_eq!(instance_1.tab_statuses.get(&0), Some(&"🤖".to_string()));
+    }
 }
