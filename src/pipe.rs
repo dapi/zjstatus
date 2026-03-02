@@ -283,4 +283,45 @@ mod test {
         assert!(!result);
         assert_eq!(state.tab_statuses.get(&0), Some(&"✅".to_string()));
     }
+
+    /// Demonstrates the root cause of status desync between zjstatus instances.
+    ///
+    /// In production, each tab has its own zjstatus plugin instance with independent state.
+    /// When a pipe message (set_status) is sent, only EXISTING instances receive it.
+    /// A new instance (created with a new tab) starts with empty tab_statuses and
+    /// never receives messages that were sent before its creation.
+    ///
+    /// Repro: create session → set status on tab 0 → create tab 1 → click tab 1 →
+    /// tab 0's status disappears (because tab 1's zjstatus has empty tab_statuses).
+    #[test]
+    fn test_new_instance_missing_statuses_from_earlier_pipes() {
+        // Instance 0 exists from the start, receives set_status for tab 0
+        let mut instance_0 = make_state_with_panes();
+        process_line(&mut instance_0, "zjstatus::set_status::10::🤖");
+        assert_eq!(
+            instance_0.tab_statuses.get(&0),
+            Some(&"🤖".to_string()),
+            "instance_0 correctly stores the status"
+        );
+
+        // Instance 1 is created later (new tab) — starts with empty state.
+        // It has the same PaneManifest (Zellij sends PaneUpdate to all plugins),
+        // but it never received the set_status pipe message.
+        let instance_1 = make_state_with_panes();
+
+        // BUG: instance_1 doesn't know about tab 0's status.
+        // When tab 1 is active, instance_1 renders and tab 0 appears without status.
+        assert!(
+            instance_1.tab_statuses.is_empty(),
+            "new instance has no statuses — this is the bug: \
+             when tab 1 is active, instance_1 renders and tab 0's status is lost"
+        );
+
+        // Both instances should ideally agree on tab_statuses,
+        // but they diverge because there's no sync mechanism.
+        assert_ne!(
+            instance_0.tab_statuses, instance_1.tab_statuses,
+            "instances have divergent tab_statuses — root cause of the visual glitch"
+        );
+    }
 }
