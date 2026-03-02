@@ -1,5 +1,7 @@
 .PHONY: build test clippy dev install-scripts install-layout install-plugin install
 
+all: build install
+
 build:
 	cargo build --target wasm32-wasip1 --release
 
