@@ -29,6 +29,8 @@ struct State {
     module_config: config::ModuleConfig,
     widget_map: BTreeMap<String, Arc<dyn Widget>>,
     err: Option<anyhow::Error>,
+    plugin_url: Option<String>,
+    prev_tab_count: usize,
 }
 
 #[cfg(not(test))]
@@ -36,10 +38,10 @@ register_plugin!(State);
 
 #[cfg(feature = "tracing")]
 fn init_tracing() {
-    use std::fs::File;
+    use std::fs::OpenOptions;
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-    let file = File::create("/host/.zjstatus.log");
+    let file = OpenOptions::new().create(true).append(true).open("/host/.zjstatus.log");
     let file = match file {
         Ok(file) => file,
         Err(error) => panic!("Error: {:?}", error),
@@ -63,6 +65,7 @@ impl ZellijPlugin for State {
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
             PermissionType::RunCommands,
+            PermissionType::MessageAndLaunchOtherPlugins,
         ]);
 
         subscribe(&[
@@ -107,21 +110,12 @@ impl ZellijPlugin for State {
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
         let mut should_render = false;
 
-        match pipe_message.source {
-            PipeSource::Cli(_) => {
-                if let Some(input) = pipe_message.payload {
-                    should_render = pipe::parse_protocol(&mut self.state, &input);
-                }
-            }
-            PipeSource::Plugin(_) => {
-                if let Some(input) = pipe_message.payload {
-                    should_render = pipe::parse_protocol(&mut self.state, &input);
-                }
-            }
-            PipeSource::Keybind => {
-                if let Some(input) = pipe_message.payload {
-                    should_render = pipe::parse_protocol(&mut self.state, &input);
-                }
+        if let Some(input) = pipe_message.payload {
+            let (render, broadcast) = pipe::parse_protocol(&mut self.state, &input);
+            should_render = render;
+
+            if broadcast {
+                self.broadcast_statuses();
             }
         }
 
@@ -176,6 +170,59 @@ impl ZellijPlugin for State {
 }
 
 impl State {
+    fn sibling_plugin_ids(&self) -> Vec<u32> {
+        let Some(my_url) = &self.plugin_url else {
+            return Vec::new();
+        };
+        let my_id = get_plugin_ids().plugin_id;
+        let mut ids = Vec::new();
+        for (_tab_idx, pane_list) in &self.state.panes.panes {
+            for pane in pane_list {
+                if pane.is_plugin && pane.id != my_id {
+                    if let Some(ref url) = pane.plugin_url {
+                        if url == my_url {
+                            ids.push(pane.id);
+                        }
+                    }
+                }
+            }
+        }
+        ids
+    }
+
+    fn send_to_siblings(&self, payload: &str) {
+        let siblings = self.sibling_plugin_ids();
+        tracing::debug!(siblings = ?siblings, "send_to_siblings");
+        for id in siblings {
+            pipe_message_to_plugin(
+                MessageToPlugin::new("zjstatus")
+                    .with_destination_plugin_id(id)
+                    .with_payload(payload),
+            );
+        }
+    }
+
+    fn request_statuses_from_siblings(&self) {
+        if self.plugin_url.is_none() {
+            return;
+        }
+        self.send_to_siblings("zjstatus::status_request::_");
+    }
+
+    fn broadcast_statuses(&self) {
+        if self.plugin_url.is_none() {
+            return;
+        }
+
+        if self.state.tab_statuses.is_empty() {
+            return;
+        }
+
+        let json = pipe::serialize_tab_statuses(&self.state.tab_statuses);
+        let payload = format!("zjstatus::status_sync::{}", json);
+        self.send_to_siblings(&payload);
+    }
+
     fn handle_event(&mut self, event: Event) -> bool {
         let mut should_render = false;
         match event {
@@ -218,6 +265,21 @@ impl State {
                 );
 
                 self.state.panes = pane_info;
+
+                if self.plugin_url.is_none() {
+                    let my_plugin_id = get_plugin_ids().plugin_id;
+                    for (_tab_idx, pane_list) in &self.state.panes.panes {
+                        if let Some(pane) =
+                            pane_list.iter().find(|p| p.is_plugin && p.id == my_plugin_id)
+                        {
+                            self.plugin_url = pane.plugin_url.clone();
+                            tracing::debug!(plugin_url = ?self.plugin_url, "discovered own plugin_url");
+                            self.request_statuses_from_siblings();
+                            break;
+                        }
+                    }
+                }
+
                 self.state.cache_mask = UpdateEventMask::Tab as u8;
 
                 should_render = true;
@@ -288,6 +350,7 @@ impl State {
             }
             Event::TabUpdate(tab_info) => {
                 tracing::Span::current().record("event_type", "Event::TabUpdate");
+
                 tracing::debug!(tab_count = ?tab_info.len());
 
                 self.state.cache_mask = UpdateEventMask::Tab as u8;
@@ -298,6 +361,14 @@ impl State {
                 self.state
                     .tab_statuses
                     .retain(|pos, _| valid_positions.contains(pos));
+
+                // Broadcast statuses to new instances when tab count grows
+                if self.state.tabs.len() > self.prev_tab_count
+                    && !self.state.tab_statuses.is_empty()
+                {
+                    self.broadcast_statuses();
+                }
+                self.prev_tab_count = self.state.tabs.len();
 
                 should_render = true;
             }
