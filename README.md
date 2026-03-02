@@ -2,6 +2,9 @@
 
 <p align="center">
   A configurable and themable statusbar for zellij.
+  <br>
+  <em>Fork of <a href="https://github.com/dj95/zjstatus">dj95/zjstatus</a> with tab emoji status support via pipe protocol.<br>
+  Original plugin by <a href="https://github.com/dj95">@dj95</a> — all credit for the core goes to the upstream project.</em>
   <br><br>
   <a href="https://github.com/dj95/zjstatus/actions/workflows/lint.yml">
     <img alt="clippy check" src="https://github.com/dj95/zjstatus/actions/workflows/lint.yml/badge.svg" />
@@ -175,6 +178,42 @@ load_plugins {
     }
 }
 ```
+
+## 🏷️ Tab Status
+
+This fork adds a `{status}` placeholder for tab templates, allowing you to display emoji indicators on tabs via pipe commands.
+
+### Configuration
+
+Add `{status}` to your tab templates:
+
+```kdl
+tab_active   "#[fg=#89B4FA,bold] {status}{name} "
+tab_normal   "#[fg=#6C7086] {status}{name} "
+```
+
+### Usage
+
+Set or clear status from any pane using pipe commands:
+
+```bash
+# Set emoji status on current tab
+zellij pipe --name zjstatus -- "zjstatus::set_status::${ZELLIJ_PANE_ID}::🤖"
+
+# Clear status
+zellij pipe --name zjstatus -- "zjstatus::clear_status::${ZELLIJ_PANE_ID}"
+```
+
+Or use the helper script:
+
+```bash
+zellij-tab-status "🤖 "     # set emoji (trailing space recommended)
+zellij-tab-status --clear   # remove status
+```
+
+Result: `🤖 my-tab` when status is set, `my-tab` when cleared.
+
+For full details, see [docs/tab-status.md](./docs/tab-status.md).
 
 ## 🧱 Widgets
 
