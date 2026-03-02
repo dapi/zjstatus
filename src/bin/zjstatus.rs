@@ -110,17 +110,23 @@ impl ZellijPlugin for State {
         match pipe_message.source {
             PipeSource::Cli(_) => {
                 if let Some(input) = pipe_message.payload {
-                    should_render = pipe::parse_protocol(&mut self.state, &input);
+                    let (render, _broadcast) =
+                        pipe::parse_protocol(&mut self.state, &input);
+                    should_render = render;
                 }
             }
             PipeSource::Plugin(_) => {
                 if let Some(input) = pipe_message.payload {
-                    should_render = pipe::parse_protocol(&mut self.state, &input);
+                    let (render, _broadcast) =
+                        pipe::parse_protocol(&mut self.state, &input);
+                    should_render = render;
                 }
             }
             PipeSource::Keybind => {
                 if let Some(input) = pipe_message.payload {
-                    should_render = pipe::parse_protocol(&mut self.state, &input);
+                    let (render, _broadcast) =
+                        pipe::parse_protocol(&mut self.state, &input);
+                    should_render = render;
                 }
             }
         }
