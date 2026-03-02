@@ -1,6 +1,6 @@
-.PHONY: build test clippy dev install-scripts install-layout install-plugin install
+.PHONY: build test clippy dev install-scripts install-layout install-plugin install grant-permissions
 
-all: build install
+all: build install grant-permissions
 
 build:
 	cargo build --target wasm32-wasip1 --release
@@ -26,3 +26,7 @@ install-layout:
 	install -m 644 layouts/ai-default.kdl ~/.config/zellij/layouts/
 
 install: install-plugin install-layout install-scripts
+
+grant-permissions:
+	zellij action launch-or-focus-plugin "file:$$HOME/.config/zellij/plugins/zjstatus.wasm"
+	@echo "Now press 'y' in the focused plugin pane to grant permissions"
