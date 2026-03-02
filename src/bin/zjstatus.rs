@@ -169,6 +169,20 @@ impl ZellijPlugin for State {
 }
 
 impl State {
+    fn request_statuses_from_siblings(&self) {
+        let Some(url) = &self.plugin_url else {
+            return;
+        };
+
+        pipe_message_to_plugin(
+            MessageToPlugin::new("zjstatus")
+                .with_plugin_url(url)
+                .with_payload("zjstatus::status_request::_"),
+        );
+
+        tracing::debug!("requested tab_statuses from sibling instances");
+    }
+
     fn broadcast_statuses(&self) {
         let Some(url) = &self.plugin_url else {
             tracing::debug!("broadcast_statuses: plugin_url not yet discovered, skipping");
@@ -242,6 +256,7 @@ impl State {
                         {
                             self.plugin_url = pane.plugin_url.clone();
                             tracing::debug!(plugin_url = ?self.plugin_url, "discovered own plugin_url");
+                            self.request_statuses_from_siblings();
                             break;
                         }
                     }

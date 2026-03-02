@@ -162,6 +162,11 @@ fn process_line(state: &mut ZellijState, line: &str) -> (bool, bool) {
                 tracing::warn!("status_sync: invalid JSON: {}", parts[2]);
             }
         }
+        "status_request" => {
+            // New instance requesting statuses from siblings.
+            // Don't render, just trigger broadcast so siblings respond with status_sync.
+            should_broadcast = true;
+        }
         "clear_status" => {
             if parts.len() < 3 {
                 return (false, false);
@@ -481,5 +486,56 @@ mod test {
         // Now both instances agree
         assert_eq!(instance_0.tab_statuses, instance_1.tab_statuses);
         assert_eq!(instance_1.tab_statuses.get(&0), Some(&"🤖".to_string()));
+    }
+
+    #[test]
+    fn test_status_request_triggers_broadcast_without_render() {
+        let mut state = make_state_with_panes();
+        state.tab_statuses.insert(0, "🤖".to_string());
+
+        let (should_render, should_broadcast) =
+            process_line(&mut state, "zjstatus::status_request::_");
+
+        assert!(!should_render, "status_request should not render");
+        assert!(should_broadcast, "status_request should trigger broadcast");
+        // State unchanged
+        assert_eq!(state.tab_statuses.get(&0), Some(&"🤖".to_string()));
+    }
+
+    #[test]
+    fn test_status_request_on_empty_instance() {
+        let mut state = make_state_with_panes();
+
+        let (should_render, should_broadcast) =
+            process_line(&mut state, "zjstatus::status_request::_");
+
+        assert!(!should_render);
+        assert!(should_broadcast);
+        assert!(state.tab_statuses.is_empty());
+    }
+
+    /// Full sync flow: new instance sends status_request → sibling responds with status_sync.
+    #[test]
+    fn test_pull_based_sync_flow() {
+        // Instance 0 has statuses
+        let mut instance_0 = make_state_with_panes();
+        let _ = process_line(&mut instance_0, "zjstatus::set_status::10::🤖");
+
+        // Instance 1 starts, sends status_request
+        // Instance 0 receives status_request → should_broadcast=true → broadcasts status_sync
+        let (_, should_broadcast) =
+            process_line(&mut instance_0, "zjstatus::status_request::_");
+        assert!(should_broadcast);
+
+        // Simulate broadcast: instance_0 serializes and sends status_sync
+        let sync_payload = serialize_tab_statuses(&instance_0.tab_statuses);
+        let sync_line = format!("zjstatus::status_sync::{}", sync_payload);
+
+        // Instance 1 receives status_sync
+        let mut instance_1 = make_state_with_panes();
+        let (should_render, should_broadcast) = process_line(&mut instance_1, &sync_line);
+        assert!(should_render);
+        assert!(!should_broadcast, "sync must not re-broadcast");
+        assert_eq!(instance_0.tab_statuses, instance_1.tab_statuses);
     }
 }
