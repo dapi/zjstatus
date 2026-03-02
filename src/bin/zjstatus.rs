@@ -29,6 +29,7 @@ struct State {
     module_config: config::ModuleConfig,
     widget_map: BTreeMap<String, Arc<dyn Widget>>,
     err: Option<anyhow::Error>,
+    plugin_url: Option<String>,
 }
 
 #[cfg(not(test))]
@@ -224,6 +225,20 @@ impl State {
                 );
 
                 self.state.panes = pane_info;
+
+                if self.plugin_url.is_none() {
+                    let my_plugin_id = get_plugin_ids().plugin_id;
+                    for (_tab_idx, pane_list) in &self.state.panes.panes {
+                        if let Some(pane) =
+                            pane_list.iter().find(|p| p.is_plugin && p.id == my_plugin_id)
+                        {
+                            self.plugin_url = pane.plugin_url.clone();
+                            tracing::debug!(plugin_url = ?self.plugin_url, "discovered own plugin_url");
+                            break;
+                        }
+                    }
+                }
+
                 self.state.cache_mask = UpdateEventMask::Tab as u8;
 
                 should_render = true;
