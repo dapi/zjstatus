@@ -275,9 +275,10 @@ impl TabsWidget {
             if content.contains("{status}") {
                 let status = tab_statuses
                     .get(&tab.position)
-                    .map(|s| s.as_str())
-                    .unwrap_or("");
-                content = content.replace("{status}", status);
+                    .filter(|s| !s.is_empty())
+                    .map(|s| format!("{s} "))
+                    .unwrap_or_default();
+                content = content.replace("{status}", &status);
             }
 
             if content.contains("{index}") {
@@ -784,7 +785,7 @@ mod test {
 
         #[test]
         fn test_render_tab_status_placeholder_with_status() {
-            let widget = make_widget("{name} {status}");
+            let widget = make_widget("{status}{name}");
             let tab = TabInfo {
                 name: "test".to_owned(),
                 position: 0,
@@ -800,13 +801,12 @@ mod test {
                 &tab_statuses,
             );
 
-            assert!(result.contains("test"));
-            assert!(result.contains("🤖"));
+            assert!(result.contains("🤖 test"), "expected trailing space after emoji, got: {result}");
         }
 
         #[test]
         fn test_render_tab_status_placeholder_without_status() {
-            let widget = make_widget("{name} {status}");
+            let widget = make_widget("{status}{name}");
             let tab = TabInfo {
                 name: "test".to_owned(),
                 position: 0,
@@ -823,6 +823,7 @@ mod test {
 
             assert!(result.contains("test"));
             assert!(!result.contains("{status}"));
+            assert!(!result.contains(" test"), "no extra space when status is empty, got: {result}");
         }
 
         #[test]
