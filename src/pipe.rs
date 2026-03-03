@@ -58,7 +58,7 @@ pub fn serialize_tab_statuses(map: &BTreeMap<usize, String>) -> String {
     format!("{{{}}}", entries.join(","))
 }
 
-fn deserialize_tab_statuses(json: &str) -> Option<BTreeMap<usize, String>> {
+pub fn deserialize_tab_statuses(json: &str) -> Option<BTreeMap<usize, String>> {
     let json = json.trim();
     if !json.starts_with('{') || !json.ends_with('}') {
         return None;
@@ -236,7 +236,7 @@ mod test {
 
     use crate::config::ZellijState;
 
-    use super::{deserialize_tab_statuses, process_line, resolve_tab_index, serialize_tab_statuses};
+    use super::{process_line, resolve_tab_index, serialize_tab_statuses};
 
     fn make_state_with_panes() -> ZellijState {
         let mut panes = HashMap::new();
