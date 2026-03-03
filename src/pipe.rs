@@ -58,7 +58,7 @@ pub fn serialize_tab_statuses(map: &BTreeMap<usize, String>) -> String {
     format!("{{{}}}", entries.join(","))
 }
 
-fn deserialize_tab_statuses(json: &str) -> Option<BTreeMap<usize, String>> {
+pub fn deserialize_tab_statuses(json: &str) -> Option<BTreeMap<usize, String>> {
     let json = json.trim();
     if !json.starts_with('{') || !json.ends_with('}') {
         return None;
