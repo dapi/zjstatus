@@ -118,6 +118,10 @@ impl ZellijPlugin for State {
             if broadcast {
                 self.broadcast_statuses();
             }
+
+            if render {
+                self.save_statuses();
+            }
         }
 
         should_render
@@ -288,6 +292,15 @@ impl State {
                 tracing::debug!(mode = ?mode_info.session_name);
 
                 self.state.mode = mode_info;
+
+                if !self.statuses_loaded {
+                    self.statuses_loaded = true;
+                    self.load_statuses();
+                    if !self.state.tab_statuses.is_empty() {
+                        self.broadcast_statuses();
+                    }
+                }
+
                 self.state.cache_mask = UpdateEventMask::Mode as u8;
 
                 should_render = true;
