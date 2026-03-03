@@ -50,3 +50,8 @@ Two binaries (`src/bin/`), one library (`src/lib.rs`):
 ## Configuration
 
 Users configure zjstatus through KDL layout files. The plugin reads `userspace_configuration` from Zellij and parses format strings like `#[fg=blue,bg=red] {mode} {tabs}"`. Widget placeholders `{name}` are replaced during render.
+
+## Design Constraints
+
+- **Never use `tab.name` as an index or key.** Tab names are user-editable, non-unique, and unreliable as identifiers. Use `tab.position` for tab identification.
+- **`tab_statuses` is keyed by `tab.position`** (`BTreeMap<usize, String>`). Status is bound to a tab, not to a specific pane. Closing a pane must not remove the tab's status.
