@@ -236,7 +236,7 @@ mod test {
 
     use crate::config::ZellijState;
 
-    use super::{deserialize_tab_statuses, process_line, resolve_tab_index, serialize_tab_statuses};
+    use super::{process_line, resolve_tab_index, serialize_tab_statuses};
 
     fn make_state_with_panes() -> ZellijState {
         let mut panes = HashMap::new();
