@@ -31,6 +31,7 @@ struct State {
     err: Option<anyhow::Error>,
     plugin_url: Option<String>,
     prev_tab_count: usize,
+    statuses_loaded: bool,
 }
 
 #[cfg(not(test))]
@@ -221,6 +222,51 @@ impl State {
         let json = pipe::serialize_tab_statuses(&self.state.tab_statuses);
         let payload = format!("zjstatus::status_sync::{}", json);
         self.send_to_siblings(&payload);
+    }
+
+    fn statuses_path(&self) -> Option<std::path::PathBuf> {
+        let session_name = self.state.mode.session_name.as_ref()?;
+        if session_name.is_empty() {
+            return None;
+        }
+        Some(
+            std::path::PathBuf::from("/host/.cache/zjstatus")
+                .join(format!("{}.json", session_name)),
+        )
+    }
+
+    fn save_statuses(&self) {
+        let Some(path) = self.statuses_path() else {
+            return;
+        };
+        let json = pipe::serialize_tab_statuses(&self.state.tab_statuses);
+        if let Some(parent) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::warn!(error = %e, "failed to create zjstatus cache dir");
+                return;
+            }
+        }
+        if let Err(e) = std::fs::write(&path, &json) {
+            tracing::warn!(error = %e, path = %path.display(), "failed to save tab_statuses");
+        }
+    }
+
+    fn load_statuses(&mut self) {
+        let Some(path) = self.statuses_path() else {
+            return;
+        };
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        if let Some(loaded) = pipe::deserialize_tab_statuses(&content) {
+            if !loaded.is_empty() {
+                self.state.tab_statuses = loaded;
+                tracing::debug!(path = %path.display(), "loaded tab_statuses from disk");
+            }
+        } else {
+            tracing::warn!(path = %path.display(), "failed to parse tab_statuses file");
+        }
     }
 
     fn handle_event(&mut self, event: Event) -> bool {
