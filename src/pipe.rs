@@ -172,15 +172,8 @@ fn process_line(
             if parts.len() < 4 {
                 return (false, false, None);
             }
-            let pane_id = match parts[2].parse::<u32>() {
-                Ok(id) => id,
-                Err(_) => {
-                    tracing::warn!("set_status: invalid pane_id: {}", parts[2]);
-                    return (false, false, None);
-                }
-            };
-            let emoji = parts[3];
-            if let Some(tab_idx) = resolve_tab_index(&state.panes, pane_id) {
+            if let Some(tab_idx) = parse_pane_and_resolve(parts[2], &state.panes) {
+                let emoji = parts[3];
                 if emoji.is_empty() {
                     state.tab_statuses.remove(&tab_idx);
                 } else {
@@ -208,17 +201,7 @@ fn process_line(
             should_broadcast = true;
         }
         "clear_status" => {
-            if parts.len() < 3 {
-                return (false, false, None);
-            }
-            let pane_id = match parts[2].parse::<u32>() {
-                Ok(id) => id,
-                Err(_) => {
-                    tracing::warn!("clear_status: invalid pane_id: {}", parts[2]);
-                    return (false, false, None);
-                }
-            };
-            if let Some(tab_idx) = resolve_tab_index(&state.panes, pane_id) {
+            if let Some(tab_idx) = parse_pane_and_resolve(parts[2], &state.panes) {
                 state.tab_statuses.remove(&tab_idx);
                 should_render = true;
                 should_broadcast = true;
