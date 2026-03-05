@@ -4,13 +4,15 @@
 #
 # Usage:
 #   zellij-tab-status 🤖           # Set status emoji
+#   zellij-tab-status --get        # Get current status emoji
+#   zellij-tab-status --name       # Get tab name
 #   zellij-tab-status --clear      # Remove status emoji
 #   zellij-tab-status --version    # Show version
 #   zellij-tab-status --help       # Show help
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.1.0"
 
 show_help() {
     cat <<'EOF'
@@ -18,6 +20,9 @@ zellij-tab-status - Manage emoji status in zjstatus tab bar
 
 Usage:
   zellij-tab-status <emoji>        Set status emoji
+  zellij-tab-status                Get current status emoji (same as --get)
+  zellij-tab-status --get, -g      Get current status emoji
+  zellij-tab-status --name, -n     Get tab name
   zellij-tab-status --clear, -c    Remove status emoji
   zellij-tab-status --version, -v  Show version
   zellij-tab-status --help, -h     Show help
@@ -28,6 +33,8 @@ Uses $ZELLIJ_PANE_ID from environment automatically.
 Examples:
   zellij-tab-status 🤖             # Set "working" status
   zellij-tab-status ✅             # Set "done" status
+  zellij-tab-status --get          # Print current status emoji
+  zellij-tab-status --name         # Print tab name
   zellij-tab-status --clear        # Remove status
 EOF
 }
@@ -35,6 +42,11 @@ EOF
 send_command() {
     local cmd="$1"
     zellij pipe --name zjstatus -- "$cmd" < /dev/null || true
+}
+
+query_command() {
+    local cmd="$1"
+    timeout 2 zellij pipe --name "zjstatus-q-$$-$RANDOM" -- "$cmd"
 }
 
 # Commands that work outside zellij
@@ -62,9 +74,13 @@ fi
 
 case "${1:-}" in
     "")
-        echo "Error: emoji argument required" >&2
-        show_help
-        exit 1
+        query_command "zjstatus::get_status::${ZELLIJ_PANE_ID}"
+        ;;
+    -g|--get)
+        query_command "zjstatus::get_status::${ZELLIJ_PANE_ID}"
+        ;;
+    -n|--name)
+        query_command "zjstatus::get_name::${ZELLIJ_PANE_ID}"
         ;;
     -c|--clear)
         send_command "zjstatus::clear_status::${ZELLIJ_PANE_ID}"
