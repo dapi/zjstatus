@@ -700,6 +700,27 @@ mod test {
         assert!(!should_render);
     }
 
+    #[test]
+    fn test_get_status_with_pipe_name_returns_response() {
+        let mut state = make_state_with_panes_and_tabs();
+        state.tab_statuses.insert(0, "🤖".to_string());
+        let (should_render, should_broadcast, response) =
+            process_line(&mut state, "zjstatus::get_status::10", Some("pipe-123"));
+        assert!(!should_render);
+        assert!(!should_broadcast);
+        assert_eq!(response, Some("🤖".to_string()));
+    }
+
+    #[test]
+    fn test_get_name_with_pipe_name_returns_response() {
+        let mut state = make_state_with_panes_and_tabs();
+        let (should_render, should_broadcast, response) =
+            process_line(&mut state, "zjstatus::get_name::10", Some("pipe-456"));
+        assert!(!should_render);
+        assert!(!should_broadcast);
+        assert_eq!(response, Some("Code".to_string()));
+    }
+
     // --- backward compatibility tests ---
 
     #[test]
