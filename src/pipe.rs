@@ -132,7 +132,7 @@ fn process_line(
     line: &str,
     cli_pipe_name: Option<&str>,
 ) -> (bool, bool, Option<String>) {
-    let parts = line.split("::").collect::<Vec<&str>>();
+    let parts = line.splitn(4, "::").collect::<Vec<&str>>();
 
     if parts.len() < 3 {
         return (false, false, None);
@@ -742,6 +742,27 @@ mod test {
         assert!(result);
         assert!(broadcast);
         assert!(state.tab_statuses.get(&1).is_none());
+    }
+
+    #[test]
+    fn test_set_status_emoji_with_colons() {
+        let mut state = make_state_with_panes();
+        let (result, _, _) = process_line(&mut state, "zjstatus::set_status::10::⚡::extra", None);
+        assert!(result);
+        assert_eq!(state.tab_statuses.get(&0), Some(&"⚡::extra".to_string()));
+    }
+
+    #[test]
+    fn test_multiline_payload_with_query() {
+        let mut state = make_state_with_panes_and_tabs();
+        state.tab_statuses.insert(0, "".to_string()); // ensure empty
+        let (should_render, _, _) = super::parse_protocol(
+            &mut state,
+            "zjstatus::set_status::10::🤖\nzjstatus::get_status::10",
+            None,
+        );
+        assert!(should_render); // from set_status
+        assert_eq!(state.tab_statuses.get(&0), Some(&"🤖".to_string()));
     }
 
     #[test]
