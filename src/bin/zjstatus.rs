@@ -112,8 +112,18 @@ impl ZellijPlugin for State {
         let mut should_render = false;
 
         if let Some(input) = pipe_message.payload {
-            let (render, broadcast) = pipe::parse_protocol(&mut self.state, &input);
+            let cli_pipe_name = match pipe_message.source {
+                PipeSource::Cli => Some(pipe_message.name.as_str()),
+                _ => None,
+            };
+            let (render, broadcast, query_response) =
+                pipe::parse_protocol(&mut self.state, &input, cli_pipe_name);
             should_render = render;
+
+            if let (Some(pipe_name), Some(response)) = (cli_pipe_name, query_response) {
+                cli_pipe_output(pipe_name, &response);
+                unblock_cli_pipe_input(pipe_name);
+            }
 
             if broadcast {
                 self.broadcast_statuses();
