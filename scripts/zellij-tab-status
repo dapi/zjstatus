@@ -46,7 +46,7 @@ send_command() {
 
 query_command() {
     local cmd="$1"
-    timeout 2 zellij pipe --name "zjstatus-q-$$-$RANDOM" -- "$cmd"
+    timeout 2 zellij pipe --name "zjstatus-q-$$-$RANDOM" -- "$cmd" < /dev/null
 }
 
 # Commands that work outside zellij

@@ -5,3 +5,10 @@
 
 # Claude Code ctags index
 .claude/tags
+
+# PR review loop artifacts
+.claude/*.local.md
+.claude/*.local.json
+.claude/*.local.log
+.codex-review.md
+.codex-review.stderr
