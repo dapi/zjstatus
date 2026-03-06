@@ -32,10 +32,15 @@ assert_pipe_responds "zjstatus::notify::after cmd" "command widget: plugin respo
 # --- test_many_tabs ---
 echo "  [test_many_tabs] creating 4 tabs"
 for i in $(seq 1 4); do
+    if ! zellij list-sessions 2>/dev/null | grep -q "$ZELLIJ_SESSION"; then
+        echo "  FAIL: session died during tab creation (tab $i)"
+        ((FAIL++)) || true
+        break
+    fi
     timeout 10 zellij action new-tab 2>/dev/null
-    sleep 1
+    sleep 2
 done
-sleep 2
+sleep 3
 assert_tab_count "5" "5 tabs exist (1 original + 4 new)"
 assert_session_alive "many tabs: session alive with 5 tabs"
 assert_pipe_responds "zjstatus::notify::many tabs" "many tabs: plugin responds with 5 tabs"
