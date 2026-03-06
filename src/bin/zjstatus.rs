@@ -67,6 +67,7 @@ impl ZellijPlugin for State {
             PermissionType::ChangeApplicationState,
             PermissionType::RunCommands,
             PermissionType::MessageAndLaunchOtherPlugins,
+            PermissionType::ReadCliPipes,
         ]);
 
         subscribe(&[
