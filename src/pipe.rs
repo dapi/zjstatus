@@ -27,14 +27,20 @@ use crate::{
 /// The function returns a boolean indicating whether the state has been
 /// changed and the UI should be re-rendered.
 #[tracing::instrument(skip(state))]
-pub fn parse_protocol(state: &mut ZellijState, input: &str) -> (bool, bool) {
+pub fn parse_protocol(
+    state: &mut ZellijState,
+    input: &str,
+    cli_pipe_name: Option<&str>,
+) -> (bool, bool, Option<String>) {
     tracing::debug!("parsing protocol");
     let lines = input.split('\n').collect::<Vec<&str>>();
 
     let mut should_render = false;
     let mut should_broadcast = false;
+    let mut query_response = None;
     for line in lines {
-        let (line_renders, line_broadcasts) = process_line(state, line);
+        let (line_renders, line_broadcasts, line_response) =
+            process_line(state, line, cli_pipe_name);
 
         if line_renders {
             should_render = true;
@@ -42,9 +48,12 @@ pub fn parse_protocol(state: &mut ZellijState, input: &str) -> (bool, bool) {
         if line_broadcasts {
             should_broadcast = true;
         }
+        if line_response.is_some() {
+            query_response = line_response;
+        }
     }
 
-    (should_render, should_broadcast)
+    (should_render, should_broadcast, query_response)
 }
 
 pub fn serialize_tab_statuses(map: &BTreeMap<usize, String>) -> String {
@@ -91,22 +100,53 @@ fn resolve_tab_index(panes: &PaneManifest, pane_id: u32) -> Option<usize> {
     None
 }
 
+fn parse_pane_and_resolve(raw: &str, panes: &PaneManifest) -> Option<usize> {
+    let pane_id = raw.parse::<u32>().ok()?;
+    resolve_tab_index(panes, pane_id)
+}
+
+fn resolve_get_status(state: &ZellijState, raw_pane_id: &str) -> String {
+    let tab_idx = match parse_pane_and_resolve(raw_pane_id, &state.panes) {
+        Some(idx) => idx,
+        None => return String::new(),
+    };
+    state.tab_statuses.get(&tab_idx).cloned().unwrap_or_default()
+}
+
+fn resolve_get_name(state: &ZellijState, raw_pane_id: &str) -> String {
+    let tab_idx = match parse_pane_and_resolve(raw_pane_id, &state.panes) {
+        Some(idx) => idx,
+        None => return String::new(),
+    };
+    state
+        .tabs
+        .iter()
+        .find(|t| t.position == tab_idx)
+        .map(|t| t.name.clone())
+        .unwrap_or_default()
+}
+
 #[tracing::instrument(skip_all)]
-fn process_line(state: &mut ZellijState, line: &str) -> (bool, bool) {
-    let parts = line.split("::").collect::<Vec<&str>>();
+fn process_line(
+    state: &mut ZellijState,
+    line: &str,
+    cli_pipe_name: Option<&str>,
+) -> (bool, bool, Option<String>) {
+    let parts = line.splitn(4, "::").collect::<Vec<&str>>();
 
     if parts.len() < 3 {
-        return (false, false);
+        return (false, false, None);
     }
 
     if parts[0] != "zjstatus" {
-        return (false, false);
+        return (false, false, None);
     }
 
     tracing::debug!("command: {}", parts[1]);
 
     let mut should_render = false;
     let mut should_broadcast = false;
+    let mut query_response = None;
     #[allow(clippy::single_match)]
     match parts[1] {
         "rerun" => {
@@ -121,7 +161,7 @@ fn process_line(state: &mut ZellijState, line: &str) -> (bool, bool) {
         }
         "pipe" => {
             if parts.len() < 4 {
-                return (false, false);
+                return (false, false, None);
             }
 
             pipe(state, parts[2], parts[3]);
@@ -130,17 +170,10 @@ fn process_line(state: &mut ZellijState, line: &str) -> (bool, bool) {
         }
         "set_status" => {
             if parts.len() < 4 {
-                return (false, false);
+                return (false, false, None);
             }
-            let pane_id = match parts[2].parse::<u32>() {
-                Ok(id) => id,
-                Err(_) => {
-                    tracing::warn!("set_status: invalid pane_id: {}", parts[2]);
-                    return (false, false);
-                }
-            };
-            let emoji = parts[3];
-            if let Some(tab_idx) = resolve_tab_index(&state.panes, pane_id) {
+            if let Some(tab_idx) = parse_pane_and_resolve(parts[2], &state.panes) {
+                let emoji = parts[3];
                 if emoji.is_empty() {
                     state.tab_statuses.remove(&tab_idx);
                 } else {
@@ -152,7 +185,7 @@ fn process_line(state: &mut ZellijState, line: &str) -> (bool, bool) {
         }
         "status_sync" => {
             if parts.len() < 3 {
-                return (false, false);
+                return (false, false, None);
             }
             if let Some(new_statuses) = deserialize_tab_statuses(parts[2]) {
                 state.tab_statuses = new_statuses;
@@ -168,20 +201,20 @@ fn process_line(state: &mut ZellijState, line: &str) -> (bool, bool) {
             should_broadcast = true;
         }
         "clear_status" => {
-            if parts.len() < 3 {
-                return (false, false);
-            }
-            let pane_id = match parts[2].parse::<u32>() {
-                Ok(id) => id,
-                Err(_) => {
-                    tracing::warn!("clear_status: invalid pane_id: {}", parts[2]);
-                    return (false, false);
-                }
-            };
-            if let Some(tab_idx) = resolve_tab_index(&state.panes, pane_id) {
+            if let Some(tab_idx) = parse_pane_and_resolve(parts[2], &state.panes) {
                 state.tab_statuses.remove(&tab_idx);
                 should_render = true;
                 should_broadcast = true;
+            }
+        }
+        "get_status" => {
+            if cli_pipe_name.is_some() {
+                query_response = Some(resolve_get_status(state, parts[2]));
+            }
+        }
+        "get_name" => {
+            if cli_pipe_name.is_some() {
+                query_response = Some(resolve_get_name(state, parts[2]));
             }
         }
         _ => {
@@ -189,7 +222,7 @@ fn process_line(state: &mut ZellijState, line: &str) -> (bool, bool) {
         }
     }
 
-    (should_render, should_broadcast)
+    (should_render, should_broadcast, query_response)
 }
 
 fn pipe(state: &mut ZellijState, name: &str, content: &str) {
@@ -232,11 +265,14 @@ fn rerun_command(state: &mut ZellijState, command_name: &str) {
 mod test {
     use std::collections::HashMap;
 
-    use zellij_tile::prelude::{PaneInfo, PaneManifest};
+    use zellij_tile::prelude::{PaneInfo, PaneManifest, TabInfo};
 
     use crate::config::ZellijState;
 
-    use super::{process_line, resolve_tab_index, serialize_tab_statuses};
+    use super::{
+        process_line, resolve_get_name, resolve_get_status, resolve_tab_index,
+        serialize_tab_statuses,
+    };
 
     fn make_state_with_panes() -> ZellijState {
         let mut panes = HashMap::new();
@@ -281,7 +317,7 @@ mod test {
     #[test]
     fn test_set_status_valid() {
         let mut state = make_state_with_panes();
-        let (result, _) = process_line(&mut state, "zjstatus::set_status::10::🤖");
+        let (result, _, _) = process_line(&mut state, "zjstatus::set_status::10::🤖", None);
         assert!(result);
         assert_eq!(state.tab_statuses.get(&0), Some(&"🤖".to_string()));
     }
@@ -289,7 +325,7 @@ mod test {
     #[test]
     fn test_set_status_invalid_pane_id() {
         let mut state = make_state_with_panes();
-        let (result, _) = process_line(&mut state, "zjstatus::set_status::abc::🤖");
+        let (result, _, _) = process_line(&mut state, "zjstatus::set_status::abc::🤖", None);
         assert!(!result);
         assert!(state.tab_statuses.is_empty());
     }
@@ -297,7 +333,7 @@ mod test {
     #[test]
     fn test_set_status_unknown_pane_id() {
         let mut state = make_state_with_panes();
-        let (result, _) = process_line(&mut state, "zjstatus::set_status::99::🤖");
+        let (result, _, _) = process_line(&mut state, "zjstatus::set_status::99::🤖", None);
         assert!(!result);
         assert!(state.tab_statuses.is_empty());
     }
@@ -306,7 +342,7 @@ mod test {
     fn test_set_status_empty_emoji_clears() {
         let mut state = make_state_with_panes();
         state.tab_statuses.insert(0, "🤖".to_string());
-        let (result, _) = process_line(&mut state, "zjstatus::set_status::10::");
+        let (result, _, _) = process_line(&mut state, "zjstatus::set_status::10::", None);
         assert!(result);
         assert!(state.tab_statuses.get(&0).is_none());
     }
@@ -315,7 +351,7 @@ mod test {
     fn test_clear_status() {
         let mut state = make_state_with_panes();
         state.tab_statuses.insert(1, "✅".to_string());
-        let (result, _) = process_line(&mut state, "zjstatus::clear_status::20");
+        let (result, _, _) = process_line(&mut state, "zjstatus::clear_status::20", None);
         assert!(result);
         assert!(state.tab_statuses.get(&1).is_none());
     }
@@ -323,7 +359,7 @@ mod test {
     #[test]
     fn test_clear_status_idempotent() {
         let mut state = make_state_with_panes();
-        let (result, _) = process_line(&mut state, "zjstatus::clear_status::20");
+        let (result, _, _) = process_line(&mut state, "zjstatus::clear_status::20", None);
         assert!(result);
         assert!(state.tab_statuses.is_empty());
     }
@@ -331,7 +367,7 @@ mod test {
     #[test]
     fn test_set_status_too_few_parts() {
         let mut state = make_state_with_panes();
-        let (result, _) = process_line(&mut state, "zjstatus::set_status::10");
+        let (result, _, _) = process_line(&mut state, "zjstatus::set_status::10", None);
         assert!(!result);
     }
 
@@ -339,7 +375,7 @@ mod test {
     fn test_clear_status_invalid_pane_id() {
         let mut state = make_state_with_panes();
         state.tab_statuses.insert(0, "✅".to_string());
-        let (result, _) = process_line(&mut state, "zjstatus::clear_status::abc");
+        let (result, _, _) = process_line(&mut state, "zjstatus::clear_status::abc", None);
         assert!(!result);
         assert_eq!(state.tab_statuses.get(&0), Some(&"✅".to_string()));
     }
@@ -347,8 +383,8 @@ mod test {
     #[test]
     fn test_set_status_returns_should_broadcast_true() {
         let mut state = make_state_with_panes();
-        let (should_render, should_broadcast) =
-            process_line(&mut state, "zjstatus::set_status::10::🤖");
+        let (should_render, should_broadcast, _) =
+            process_line(&mut state, "zjstatus::set_status::10::🤖", None);
         assert!(should_render);
         assert!(should_broadcast);
     }
@@ -357,8 +393,8 @@ mod test {
     fn test_clear_status_returns_should_broadcast_true() {
         let mut state = make_state_with_panes();
         state.tab_statuses.insert(1, "✅".to_string());
-        let (should_render, should_broadcast) =
-            process_line(&mut state, "zjstatus::clear_status::20");
+        let (should_render, should_broadcast, _) =
+            process_line(&mut state, "zjstatus::clear_status::20", None);
         assert!(should_render);
         assert!(should_broadcast);
     }
@@ -367,8 +403,8 @@ mod test {
     fn test_status_sync_replaces_local_statuses() {
         let mut state = make_state_with_panes();
         state.tab_statuses.insert(0, "old".to_string());
-        let (should_render, should_broadcast) =
-            process_line(&mut state, "zjstatus::status_sync::{\"0\":\"🤖\",\"1\":\"✅\"}");
+        let (should_render, should_broadcast, _) =
+            process_line(&mut state, "zjstatus::status_sync::{\"0\":\"🤖\",\"1\":\"✅\"}", None);
         assert!(should_render);
         assert!(!should_broadcast);
         assert_eq!(state.tab_statuses.get(&0), Some(&"🤖".to_string()));
@@ -380,8 +416,8 @@ mod test {
         let mut state = make_state_with_panes();
         state.tab_statuses.insert(0, "🤖".to_string());
         state.tab_statuses.insert(1, "✅".to_string());
-        let (should_render, _) =
-            process_line(&mut state, "zjstatus::status_sync::{\"1\":\"✅\"}");
+        let (should_render, _, _) =
+            process_line(&mut state, "zjstatus::status_sync::{\"1\":\"✅\"}", None);
         assert!(should_render);
         assert!(state.tab_statuses.get(&0).is_none());
         assert_eq!(state.tab_statuses.get(&1), Some(&"✅".to_string()));
@@ -391,7 +427,7 @@ mod test {
     fn test_status_sync_empty_map() {
         let mut state = make_state_with_panes();
         state.tab_statuses.insert(0, "🤖".to_string());
-        let (should_render, _) = process_line(&mut state, "zjstatus::status_sync::{}");
+        let (should_render, _, _) = process_line(&mut state, "zjstatus::status_sync::{}", None);
         assert!(should_render);
         assert!(state.tab_statuses.is_empty());
     }
@@ -400,7 +436,7 @@ mod test {
     fn test_status_sync_invalid_json() {
         let mut state = make_state_with_panes();
         state.tab_statuses.insert(0, "🤖".to_string());
-        let (should_render, _) = process_line(&mut state, "zjstatus::status_sync::not_json");
+        let (should_render, _, _) = process_line(&mut state, "zjstatus::status_sync::not_json", None);
         assert!(!should_render);
         assert_eq!(state.tab_statuses.get(&0), Some(&"🤖".to_string()));
     }
@@ -432,7 +468,7 @@ mod test {
     fn test_new_instance_missing_statuses_from_earlier_pipes() {
         // Instance 0 exists from the start, receives set_status for tab 0
         let mut instance_0 = make_state_with_panes();
-        let _ = process_line(&mut instance_0, "zjstatus::set_status::10::🤖");
+        let _ = process_line(&mut instance_0, "zjstatus::set_status::10::🤖", None);
         assert_eq!(
             instance_0.tab_statuses.get(&0),
             Some(&"🤖".to_string()),
@@ -468,7 +504,7 @@ mod test {
     fn test_status_sync_resolves_instance_desync() {
         // Instance 0 receives set_status
         let mut instance_0 = make_state_with_panes();
-        let (_, should_broadcast) = process_line(&mut instance_0, "zjstatus::set_status::10::🤖");
+        let (_, should_broadcast, _) = process_line(&mut instance_0, "zjstatus::set_status::10::🤖", None);
         assert!(should_broadcast);
 
         // Simulate broadcast: serialize instance_0's statuses
@@ -479,7 +515,7 @@ mod test {
         let mut instance_1 = make_state_with_panes();
         assert!(instance_1.tab_statuses.is_empty(), "starts empty");
 
-        let (should_render, should_broadcast) = process_line(&mut instance_1, &sync_line);
+        let (should_render, should_broadcast, _) = process_line(&mut instance_1, &sync_line, None);
         assert!(should_render);
         assert!(!should_broadcast, "sync must not re-broadcast");
 
@@ -493,8 +529,8 @@ mod test {
         let mut state = make_state_with_panes();
         state.tab_statuses.insert(0, "🤖".to_string());
 
-        let (should_render, should_broadcast) =
-            process_line(&mut state, "zjstatus::status_request::_");
+        let (should_render, should_broadcast, _) =
+            process_line(&mut state, "zjstatus::status_request::_", None);
 
         assert!(!should_render, "status_request should not render");
         assert!(should_broadcast, "status_request should trigger broadcast");
@@ -506,8 +542,8 @@ mod test {
     fn test_status_request_on_empty_instance() {
         let mut state = make_state_with_panes();
 
-        let (should_render, should_broadcast) =
-            process_line(&mut state, "zjstatus::status_request::_");
+        let (should_render, should_broadcast, _) =
+            process_line(&mut state, "zjstatus::status_request::_", None);
 
         assert!(!should_render);
         assert!(should_broadcast);
@@ -519,12 +555,12 @@ mod test {
     fn test_pull_based_sync_flow() {
         // Instance 0 has statuses
         let mut instance_0 = make_state_with_panes();
-        let _ = process_line(&mut instance_0, "zjstatus::set_status::10::🤖");
+        let _ = process_line(&mut instance_0, "zjstatus::set_status::10::🤖", None);
 
         // Instance 1 starts, sends status_request
         // Instance 0 receives status_request → should_broadcast=true → broadcasts status_sync
-        let (_, should_broadcast) =
-            process_line(&mut instance_0, "zjstatus::status_request::_");
+        let (_, should_broadcast, _) =
+            process_line(&mut instance_0, "zjstatus::status_request::_", None);
         assert!(should_broadcast);
 
         // Simulate broadcast: instance_0 serializes and sends status_sync
@@ -533,9 +569,195 @@ mod test {
 
         // Instance 1 receives status_sync
         let mut instance_1 = make_state_with_panes();
-        let (should_render, should_broadcast) = process_line(&mut instance_1, &sync_line);
+        let (should_render, should_broadcast, _) = process_line(&mut instance_1, &sync_line, None);
         assert!(should_render);
         assert!(!should_broadcast, "sync must not re-broadcast");
         assert_eq!(instance_0.tab_statuses, instance_1.tab_statuses);
+    }
+
+    fn make_state_with_panes_and_tabs() -> ZellijState {
+        let mut state = make_state_with_panes();
+        state.tabs = vec![
+            TabInfo {
+                position: 0,
+                name: "Code".to_string(),
+                ..TabInfo::default()
+            },
+            TabInfo {
+                position: 1,
+                name: "Terminal".to_string(),
+                ..TabInfo::default()
+            },
+        ];
+        state
+    }
+
+    // --- resolve_get_status tests ---
+
+    #[test]
+    fn test_get_status_existing() {
+        let mut state = make_state_with_panes_and_tabs();
+        state.tab_statuses.insert(0, "🤖".to_string());
+        assert_eq!(resolve_get_status(&state, "10"), "🤖");
+    }
+
+    #[test]
+    fn test_get_status_missing() {
+        let state = make_state_with_panes_and_tabs();
+        assert_eq!(resolve_get_status(&state, "20"), "");
+    }
+
+    #[test]
+    fn test_get_status_empty_statuses() {
+        let state = make_state_with_panes_and_tabs();
+        assert_eq!(resolve_get_status(&state, "10"), "");
+    }
+
+    #[test]
+    fn test_get_status_invalid_pane_id() {
+        let state = make_state_with_panes_and_tabs();
+        assert_eq!(resolve_get_status(&state, "abc"), "");
+    }
+
+    #[test]
+    fn test_get_status_unknown_pane_id() {
+        let state = make_state_with_panes_and_tabs();
+        assert_eq!(resolve_get_status(&state, "99"), "");
+    }
+
+    // --- resolve_get_name tests ---
+
+    #[test]
+    fn test_get_name_existing() {
+        let state = make_state_with_panes_and_tabs();
+        assert_eq!(resolve_get_name(&state, "10"), "Code");
+    }
+
+    #[test]
+    fn test_get_name_no_tabs() {
+        let mut state = make_state_with_panes_and_tabs();
+        state.tabs = vec![];
+        assert_eq!(resolve_get_name(&state, "10"), "");
+    }
+
+    #[test]
+    fn test_get_name_invalid_pane_id() {
+        let state = make_state_with_panes_and_tabs();
+        assert_eq!(resolve_get_name(&state, "abc"), "");
+    }
+
+    #[test]
+    fn test_get_name_unknown_pane_id() {
+        let state = make_state_with_panes_and_tabs();
+        assert_eq!(resolve_get_name(&state, "99"), "");
+    }
+
+    // --- process_line behavior tests for query commands ---
+
+    #[test]
+    fn test_get_status_no_pipe_name() {
+        let mut state = make_state_with_panes_and_tabs();
+        state.tab_statuses.insert(0, "🤖".to_string());
+        let (should_render, should_broadcast, _) =
+            process_line(&mut state, "zjstatus::get_status::10", None);
+        assert!(!should_render);
+        assert!(!should_broadcast);
+    }
+
+    #[test]
+    fn test_get_name_no_pipe_name() {
+        let mut state = make_state_with_panes_and_tabs();
+        let (should_render, should_broadcast, _) =
+            process_line(&mut state, "zjstatus::get_name::10", None);
+        assert!(!should_render);
+        assert!(!should_broadcast);
+    }
+
+    #[test]
+    fn test_query_commands_should_not_render() {
+        let mut state = make_state_with_panes_and_tabs();
+        state.tab_statuses.insert(0, "🤖".to_string());
+        // With cli_pipe_name=None, FFI is not called, and should_render=false
+        let (should_render, _, _) =
+            process_line(&mut state, "zjstatus::get_status::10", None);
+        assert!(!should_render);
+    }
+
+    #[test]
+    fn test_get_status_with_pipe_name_returns_response() {
+        let mut state = make_state_with_panes_and_tabs();
+        state.tab_statuses.insert(0, "🤖".to_string());
+        let (should_render, should_broadcast, response) =
+            process_line(&mut state, "zjstatus::get_status::10", Some("pipe-123"));
+        assert!(!should_render);
+        assert!(!should_broadcast);
+        assert_eq!(response, Some("🤖".to_string()));
+    }
+
+    #[test]
+    fn test_get_name_with_pipe_name_returns_response() {
+        let mut state = make_state_with_panes_and_tabs();
+        let (should_render, should_broadcast, response) =
+            process_line(&mut state, "zjstatus::get_name::10", Some("pipe-456"));
+        assert!(!should_render);
+        assert!(!should_broadcast);
+        assert_eq!(response, Some("Code".to_string()));
+    }
+
+    // --- backward compatibility tests ---
+
+    #[test]
+    fn test_set_status_with_pipe_name_none() {
+        let mut state = make_state_with_panes();
+        let (result, broadcast, _) =
+            process_line(&mut state, "zjstatus::set_status::10::🤖", None);
+        assert!(result);
+        assert!(broadcast);
+        assert_eq!(state.tab_statuses.get(&0), Some(&"🤖".to_string()));
+    }
+
+    #[test]
+    fn test_clear_status_with_pipe_name_none() {
+        let mut state = make_state_with_panes();
+        state.tab_statuses.insert(1, "✅".to_string());
+        let (result, broadcast, _) =
+            process_line(&mut state, "zjstatus::clear_status::20", None);
+        assert!(result);
+        assert!(broadcast);
+        assert!(state.tab_statuses.get(&1).is_none());
+    }
+
+    #[test]
+    fn test_set_status_emoji_with_colons() {
+        let mut state = make_state_with_panes();
+        let (result, _, _) = process_line(&mut state, "zjstatus::set_status::10::⚡::extra", None);
+        assert!(result);
+        assert_eq!(state.tab_statuses.get(&0), Some(&"⚡::extra".to_string()));
+    }
+
+    #[test]
+    fn test_multiline_payload_with_query() {
+        let mut state = make_state_with_panes_and_tabs();
+        state.tab_statuses.insert(0, "".to_string()); // ensure empty
+        let (should_render, _, _) = super::parse_protocol(
+            &mut state,
+            "zjstatus::set_status::10::🤖\nzjstatus::get_status::10",
+            None,
+        );
+        assert!(should_render); // from set_status
+        assert_eq!(state.tab_statuses.get(&0), Some(&"🤖".to_string()));
+    }
+
+    #[test]
+    fn test_existing_commands_ignore_pipe_name() {
+        let mut state = make_state_with_panes();
+        // notify still works with cli_pipe_name=None
+        let (render, _, _) = process_line(&mut state, "zjstatus::notify::hello", None);
+        assert!(render);
+
+        // pipe still works with cli_pipe_name=None
+        let (render, _, _) =
+            process_line(&mut state, "zjstatus::pipe::key::value", None);
+        assert!(render);
     }
 }
