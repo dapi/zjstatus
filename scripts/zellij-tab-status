@@ -7,6 +7,7 @@
 #   zellij-tab-status --get        # Get current status emoji
 #   zellij-tab-status --name       # Get tab name
 #   zellij-tab-status --clear      # Remove status emoji
+#   zellij-tab-status --set-name X # Rename current tab
 #   zellij-tab-status --version    # Show version
 #   zellij-tab-status --help       # Show help
 
@@ -24,6 +25,7 @@ Usage:
   zellij-tab-status --get, -g      Get current status emoji
   zellij-tab-status --name, -n     Get tab name
   zellij-tab-status --clear, -c    Remove status emoji
+  zellij-tab-status --set-name, -s Rename current tab (preserving status)
   zellij-tab-status --version, -v  Show version
   zellij-tab-status --help, -h     Show help
 
@@ -36,6 +38,7 @@ Examples:
   zellij-tab-status --get          # Print current status emoji
   zellij-tab-status --name         # Print tab name
   zellij-tab-status --clear        # Remove status
+  zellij-tab-status --set-name Code # Rename tab to "Code"
 EOF
 }
 
@@ -84,6 +87,13 @@ case "${1:-}" in
         ;;
     -c|--clear)
         send_command "zjstatus::clear_status::${ZELLIJ_PANE_ID}"
+        ;;
+    -s|--set-name)
+        if [[ -z "${2:-}" ]]; then
+            echo "Error: --set-name requires a name argument" >&2
+            exit 1
+        fi
+        zellij action rename-tab "$2"
         ;;
     -*)
         echo "Unknown option: $1" >&2
