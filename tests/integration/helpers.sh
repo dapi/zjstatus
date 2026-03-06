@@ -41,13 +41,15 @@ setup_zellij() {
         cp "$layout" /root/.config/zellij/test-layout.kdl
     fi
 
-    # zjstatus requests: ReadApplicationState, ChangeApplicationState, RunCommands
-    # ReadCliPipes needed so plugin receives CLI pipe messages
+    # Must match exactly what zjstatus requests in load().
+    # If any permission is missing, Zellij shows an interactive dialog
+    # that can't be approved in headless CI → plugin never gets permissions.
     cat > /root/.cache/zellij/permissions.kdl <<PERMS
 "$PLUGIN_WASM" {
     ReadApplicationState
     ChangeApplicationState
     RunCommands
+    MessageAndLaunchOtherPlugins
     ReadCliPipes
 }
 PERMS
