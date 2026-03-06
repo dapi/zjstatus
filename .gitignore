@@ -12,3 +12,4 @@
 .claude/*.local.log
 .codex-review.md
 .codex-review.stderr
+.cache/
