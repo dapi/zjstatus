@@ -2,6 +2,9 @@
 
 all: build install grant-permissions
 
+skills:
+	npx skillfish add delorenj/skills zellij-plugin-dev
+
 build:
 	cargo build --target wasm32-wasip1 --release
 

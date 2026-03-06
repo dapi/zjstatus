@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "zellij-plugin-dev",
+  "owner": "delorenj",
+  "repo": "skills",
+  "path": "zellij-plugin-dev",
+  "branch": "main",
+  "sha": "9e57c209ea7570b17f4ba8948036c9e13c340966",
+  "source": "manual"
+}
