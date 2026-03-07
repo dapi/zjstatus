@@ -60,6 +60,14 @@ case "${1:-}" in
         ;;
     -v|--version)
         echo "zellij-tab-status $SCRIPT_VERSION"
+        if [[ -n "${ZELLIJ:-}" ]]; then
+            plugin_version=$(timeout 2 zellij pipe --name "zjstatus-q-$$-$RANDOM" -- "zjstatus::version::_" < /dev/null 2>/dev/null || true)
+            if [[ -n "$plugin_version" ]]; then
+                echo "zjstatus plugin $plugin_version"
+            else
+                echo "zjstatus plugin (unavailable)"
+            fi
+        fi
         exit 0
         ;;
 esac

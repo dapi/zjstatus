@@ -217,6 +217,11 @@ fn process_line(
                 query_response = Some(resolve_get_name(state, parts[2]));
             }
         }
+        "version" => {
+            if cli_pipe_name.is_some() {
+                query_response = Some(env!("CARGO_PKG_VERSION").to_string());
+            }
+        }
         _ => {
             tracing::debug!("unknown zjstatus command: {}", parts[1]);
         }
@@ -702,6 +707,26 @@ mod test {
         assert!(!should_render);
         assert!(!should_broadcast);
         assert_eq!(response, Some("Code".to_string()));
+    }
+
+    #[test]
+    fn test_version_no_pipe_name() {
+        let mut state = make_state_with_panes();
+        let (should_render, should_broadcast, response) =
+            process_line(&mut state, "zjstatus::version::_", None);
+        assert!(!should_render);
+        assert!(!should_broadcast);
+        assert_eq!(response, None);
+    }
+
+    #[test]
+    fn test_version_with_pipe_name_returns_response() {
+        let mut state = make_state_with_panes();
+        let (should_render, should_broadcast, response) =
+            process_line(&mut state, "zjstatus::version::_", Some("pipe-789"));
+        assert!(!should_render);
+        assert!(!should_broadcast);
+        assert_eq!(response, Some(env!("CARGO_PKG_VERSION").to_string()));
     }
 
     // --- backward compatibility tests ---
