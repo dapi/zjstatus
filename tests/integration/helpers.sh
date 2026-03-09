@@ -163,6 +163,11 @@ send_pipe() {
     return $rc
 }
 
+query_pipe() {
+    local pipe_msg="$1"
+    timeout "${ZELLIJ_TEST_TIMEOUT}s" zellij pipe --plugin "file:$PLUGIN_WASM" --name "query-$$-$RANDOM" -- "$pipe_msg" < /dev/null 2>/dev/null
+}
+
 # --- Tab helpers ---
 
 close_extra_tabs() {
